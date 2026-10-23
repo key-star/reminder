@@ -1,0 +1,9 @@
+web/node_modules/
+web/dist/
+desktop/build/
+desktop/dist/
+desktop/*.spec
+desktop/icon.ico
+__pycache__/
+*.py[cod]
+.pytest_cache/
