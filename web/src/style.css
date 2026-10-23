@@ -748,6 +748,10 @@ input[type='date'] {
   margin-top: 12px;
 }
 
+.clear-all-btn {
+  margin-top: 12px;
+}
+
 .hidden-input {
   display: none;
 }

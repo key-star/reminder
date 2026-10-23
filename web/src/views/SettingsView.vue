@@ -275,7 +275,7 @@ async function testDesktopAlarm(): Promise<void> {
         accept="application/json,.json"
         @change="onFileChange"
       />
-      <button class="btn btn-danger full-width" type="button" @click="clearAll">
+      <button class="btn btn-danger full-width clear-all-btn" type="button" @click="clearAll">
         清空所有提醒
       </button>
     </section>
