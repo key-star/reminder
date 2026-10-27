@@ -1,9 +1,14 @@
 web/node_modules/
 web/dist/
+web/dev-dist/
+web/.env.local
 desktop/build/
 desktop/dist/
 desktop/*.spec
 desktop/icon.ico
+worker/node_modules/
+worker/.wrangler/
+worker/.dev.vars
 __pycache__/
 *.py[cod]
 .pytest_cache/

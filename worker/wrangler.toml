@@ -1,0 +1,12 @@
+name = "reminder-push"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "reminder-push"
+database_id = "4dc0b19e-cfbd-4c44-a222-5ff648a26a31"
