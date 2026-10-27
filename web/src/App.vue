@@ -1,13 +1,34 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onBeforeUnmount, onMounted, watch } from 'vue'
 import AlarmModal from '@/components/AlarmModal.vue'
 import ConfirmHost from '@/components/ConfirmHost.vue'
 import ToastHost from '@/components/ToastHost.vue'
 import { initInstallPrompt } from '@/composables/useInstallPrompt'
+import { isPushEnabled, syncPush } from '@/push/client'
 import { useReminderStore } from '@/stores/reminders'
 
 const store = useReminderStore()
 let audioUnlocked = false
+let syncTimer: number | null = null
+
+function scheduleCloudSync(): void {
+  if (!store.ready || store.mode !== 'local' || !isPushEnabled()) return
+  if (syncTimer !== null) window.clearTimeout(syncTimer)
+  syncTimer = window.setTimeout(() => {
+    syncTimer = null
+    void syncPush(store.pending).catch(() => undefined)
+  }, 800)
+}
+
+watch(
+  () => [
+    store.ready,
+    store.mode,
+    store.pending.map((item) => [item.id, item.title, item.note, item.due_at]),
+  ],
+  scheduleCloudSync,
+  { immediate: true },
+)
 
 function unlockOnce(): void {
   if (audioUnlocked) return
@@ -28,6 +49,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', unlockOnce)
+  if (syncTimer !== null) window.clearTimeout(syncTimer)
 })
 </script>
 

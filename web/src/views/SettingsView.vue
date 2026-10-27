@@ -5,7 +5,20 @@ import { confirmDialog } from '@/composables/useConfirm'
 import { toast } from '@/composables/useToast'
 import { useInstallPrompt } from '@/composables/useInstallPrompt'
 import { downloadBackup, parseBackup } from '@/lib/backup'
+import { exportRemindersToCalendar } from '@/lib/ics'
 import type { NotificationSupport } from '@/notifier/types'
+import {
+  disablePush as disablePushService,
+  enablePush as enablePushService,
+  fetchPushStatus,
+  isPushConfigured,
+  isPushEnabled,
+  isPushSupported,
+  pushPermission,
+  sendTestPush,
+  syncPush,
+  type PushStatus,
+} from '@/push/client'
 import { useReminderStore } from '@/stores/reminders'
 import type { ImportMode } from '@/types'
 
@@ -17,6 +30,12 @@ const permission = ref<NotificationSupport>('unsupported')
 const importMode = ref<ImportMode>('merge')
 const fileInput = ref<HTMLInputElement | null>(null)
 const busy = ref(false)
+const pushEnabled = ref(false)
+const pushBusy = ref(false)
+const pushConfigured = ref(false)
+const pushSupported = ref(false)
+const pushPermissionState = ref<NotificationPermission | 'unsupported'>('unsupported')
+const pushStatus = ref<PushStatus | null>(null)
 
 const isLocal = computed(() => store.mode === 'local')
 const isDesktop = computed(() => store.mode === 'desktop')
@@ -37,13 +56,91 @@ const permissionLabel = computed(() => {
       return '当前环境不支持'
   }
 })
+const pushStatusLabel = computed(() => {
+  if (!pushSupported.value) return '当前环境不支持'
+  if (!pushConfigured.value) return '未配置云端服务'
+  if (!pushEnabled.value) return '未开启'
+  if (pushPermissionState.value === 'denied') return '通知权限被拒绝'
+  if (pushStatus.value) {
+    return `已开启 · ${pushStatus.value.pending} 条待推送`
+  }
+  return '已开启'
+})
 
 function refreshPermission(): void {
   permission.value = store.notifier?.permission() ?? 'unsupported'
 }
 
+function refreshPushState(): void {
+  pushConfigured.value = isPushConfigured()
+  pushSupported.value = isPushSupported()
+  pushEnabled.value = isPushEnabled()
+  pushPermissionState.value = pushPermission()
+  if (pushEnabled.value) void refreshPushStatus()
+}
+
+async function refreshPushStatus(): Promise<void> {
+  try {
+    pushStatus.value = await fetchPushStatus()
+  } catch {
+    pushStatus.value = null
+  }
+}
+
+async function enableCloudPush(): Promise<void> {
+  pushBusy.value = true
+  let syncError = ''
+  try {
+    await enablePushService()
+    pushEnabled.value = true
+    pushPermissionState.value = pushPermission()
+    try {
+      await syncPush(store.pending)
+    } catch (cause) {
+      syncError = cause instanceof Error ? cause.message : '提醒同步失败'
+    }
+    await refreshPushStatus()
+    if (syncError) {
+      toast(`云端推送已开启，但同步失败：${syncError}`, 'error')
+    } else {
+      toast('云端推送已开启', 'success')
+    }
+  } catch (cause) {
+    toast(cause instanceof Error ? cause.message : '开启云端推送失败', 'error')
+  } finally {
+    pushBusy.value = false
+  }
+}
+
+async function disableCloudPush(): Promise<void> {
+  pushBusy.value = true
+  try {
+    await disablePushService()
+    pushEnabled.value = false
+    pushStatus.value = null
+    toast('已关闭云端推送', 'success')
+  } catch (cause) {
+    toast(cause instanceof Error ? cause.message : '关闭云端推送失败', 'error')
+  } finally {
+    pushBusy.value = false
+  }
+}
+
+async function testCloudPush(): Promise<void> {
+  pushBusy.value = true
+  try {
+    const result = await sendTestPush()
+    toast(`测试推送已发送（${result.sent} 个设备）`, 'success')
+  } catch (cause) {
+    toast(cause instanceof Error ? cause.message : '测试推送失败', 'error')
+  } finally {
+    pushBusy.value = false
+  }
+}
+
 onMounted(() => {
   refreshPermission()
+  refreshPushState()
   if (isDesktop.value) void store.loadDesktopSettings()
 })
 
@@ -90,6 +187,26 @@ async function exportBackup(): Promise<void> {
     toast(`已导出 ${backup.reminders.length} 条提醒`, 'success')
   } catch (cause) {
     toast(cause instanceof Error ? cause.message : '导出失败', 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function addAllToCalendar(): Promise<void> {
+  if (store.pending.length === 0) {
+    toast('没有待办提醒', 'error')
+    return
+  }
+  busy.value = true
+  try {
+    const result = await exportRemindersToCalendar(store.pending)
+    if (result === 'shared') {
+      toast('已打开分享，请选择日历', 'success')
+    } else if (result === 'downloaded') {
+      toast('已生成日历文件，请用系统日历打开', 'success')
+    }
+  } catch (cause) {
+    toast(cause instanceof Error ? cause.message : '加入日历失败', 'error')
   } finally {
     busy.value = false
   }
@@ -219,10 +336,56 @@ async function testDesktopAlarm(): Promise<void> {
         </button>
       </div>
       <p class="panel-text">
-        手机端 V1 只在 App 打开时提醒；锁屏或关闭后不会触发。需要关闭后也提醒时，再升级原生壳或系统日历。
+        手机端页面内通知只在 App 打开时有效；锁屏提醒请使用下方“云端推送”，或把提醒加入系统日历。
       </p>
       <p v-if="permission === 'denied'" class="panel-text warn-text">
         通知已被拒绝。请在浏览器/系统设置中允许本站通知，或删除后重新安装。
+      </p>
+    </section>
+
+    <section v-if="isLocal" class="panel">
+      <h2 class="panel-title">云端推送</h2>
+      <div class="settings-row">
+        <div>
+          <p class="row-title">锁屏提醒</p>
+          <p class="row-sub">{{ pushStatusLabel }}</p>
+        </div>
+        <button
+          v-if="!pushEnabled"
+          class="btn btn-primary btn-sm"
+          type="button"
+          :disabled="pushBusy || !pushSupported || !pushConfigured"
+          @click="enableCloudPush"
+        >
+          开启
+        </button>
+        <button
+          v-else
+          class="btn btn-ghost btn-sm"
+          type="button"
+          :disabled="pushBusy"
+          @click="disableCloudPush"
+        >
+          关闭
+        </button>
+      </div>
+      <p class="panel-text">
+        由 Cloudflare Worker 定时检查并通过系统推送发送；手机需安装 PWA 并允许通知。
+      </p>
+      <button
+        v-if="pushEnabled"
+        class="btn btn-ghost full-width"
+        type="button"
+        :disabled="pushBusy"
+        @click="testCloudPush"
+      >
+        发送测试推送
+      </button>
+      <p v-if="!pushConfigured" class="panel-text warn-text">
+        未配置 VITE_PUSH_API_URL / VITE_VAPID_PUBLIC_KEY，云端推送不可用。
+      </p>
+      <p v-else-if="!pushSupported" class="panel-text warn-text">
+        当前环境不支持 Web Push，请使用 HTTPS 或先安装到主屏幕。
       </p>
     </section>
 
@@ -268,6 +431,14 @@ async function testDesktopAlarm(): Promise<void> {
           <option value="replace">覆盖（清空当前数据）</option>
         </select>
       </label>
+      <button
+        class="btn btn-ghost full-width"
+        type="button"
+        :disabled="busy || store.pending.length === 0"
+        @click="addAllToCalendar"
+      >
+        全部加入日历
+      </button>
       <input
         ref="fileInput"
         class="hidden-input"
