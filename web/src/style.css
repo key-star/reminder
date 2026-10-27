@@ -269,6 +269,11 @@ p {
   opacity: 0.62;
 }
 
+.reminder-card.is-focused {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 2px var(--accent-soft), 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
 .card-date {
   display: flex;
   flex-direction: column;

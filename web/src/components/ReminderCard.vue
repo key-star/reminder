@@ -8,6 +8,7 @@ const emit = defineEmits<{
   complete: [id: string]
   snooze: [id: string]
   edit: [id: string]
+  calendar: [id: string]
   remove: [id: string]
 }>()
 
@@ -64,6 +65,9 @@ const status = computed(() => {
             稍后 10 分钟
           </button>
           <button class="link-btn" type="button" @click="emit('edit', reminder.id)">编辑</button>
+          <button class="link-btn" type="button" @click="emit('calendar', reminder.id)">
+            加入日历
+          </button>
         </template>
         <template v-else>
           <button class="link-btn" type="button" @click="emit('edit', reminder.id)">编辑</button>

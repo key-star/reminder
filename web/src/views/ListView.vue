@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import ReminderCard from '@/components/ReminderCard.vue'
 import { confirmDialog } from '@/composables/useConfirm'
 import { toast } from '@/composables/useToast'
+import { exportRemindersToCalendar } from '@/lib/ics'
 import type { NotificationSupport } from '@/notifier/types'
 import { useReminderStore } from '@/stores/reminders'
 import type { Reminder } from '@/types'
 
 const store = useReminderStore()
 const router = useRouter()
+const route = useRoute()
 const tab = ref<'pending' | 'done'>('pending')
 const permission = ref<NotificationSupport>('unsupported')
+const focusedId = ref<string | null>(null)
 
 const isLocal = computed(() => store.mode === 'local')
 const todayLabel = computed(() =>
@@ -43,7 +46,25 @@ function refreshPermission(): void {
   permission.value = store.notifier?.permission() ?? 'unsupported'
 }
 
-onMounted(refreshPermission)
+function focusFromRoute(): void {
+  const raw = route.query.focus
+  const id = typeof raw === 'string' ? raw : ''
+  if (!id) return
+  focusedId.value = id
+  void nextTick(() => {
+    document
+      .getElementById(`reminder-${id}`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  })
+  window.setTimeout(() => {
+    if (focusedId.value === id) focusedId.value = null
+  }, 4000)
+}
+
+onMounted(() => {
+  refreshPermission()
+  focusFromRoute()
+})
 
 async function enableNotifications(): Promise<void> {
   try {
@@ -92,6 +113,21 @@ async function onSnooze(id: string): Promise<void> {
   }
 }
 
+async function onCalendar(id: string): Promise<void> {
+  const reminder = store.reminders.find((item) => item.id === id)
+  if (!reminder) return
+  try {
+    const result = await exportRemindersToCalendar([reminder])
+    if (result === 'shared') {
+      toast('已打开分享，请选择日历', 'success')
+    } else if (result === 'downloaded') {
+      toast('已生成日历文件，请用系统日历打开', 'success')
+    }
+  } catch (cause) {
+    toast(cause instanceof Error ? cause.message : '加入日历失败', 'error')
+  }
+}
+
 async function onRemove(id: string): Promise<void> {
   const confirmed = await confirmDialog({
     title: '删除提醒',
@@ -128,7 +164,7 @@ async function onRemove(id: string): Promise<void> {
       @click="enableNotifications"
     >
       <strong>开启通知</strong>
-      <span>到点会弹窗提醒；手机端仅在 App 打开时有效</span>
+      <span>到点会弹窗提醒；未开启云端推送时仅在 App 打开时有效</span>
     </button>
     <button
       v-else-if="isLocal && permission === 'denied'"
@@ -171,12 +207,15 @@ async function onRemove(id: string): Promise<void> {
         <div class="card-list">
           <ReminderCard
             v-for="item in attention"
+            :id="`reminder-${item.id}`"
             :key="item.id"
+            :class="{ 'is-focused': focusedId === item.id }"
             :reminder="item"
             :now="store.now"
             @complete="onComplete"
             @snooze="onSnooze"
             @edit="onEdit"
+            @calendar="onCalendar"
             @remove="onRemove"
           />
         </div>
@@ -187,12 +226,15 @@ async function onRemove(id: string): Promise<void> {
         <div class="card-list">
           <ReminderCard
             v-for="item in todayItems"
+            :id="`reminder-${item.id}`"
             :key="item.id"
+            :class="{ 'is-focused': focusedId === item.id }"
             :reminder="item"
             :now="store.now"
             @complete="onComplete"
             @snooze="onSnooze"
             @edit="onEdit"
+            @calendar="onCalendar"
             @remove="onRemove"
           />
         </div>
@@ -203,12 +245,15 @@ async function onRemove(id: string): Promise<void> {
         <div class="card-list">
           <ReminderCard
             v-for="item in laterItems"
+            :id="`reminder-${item.id}`"
             :key="item.id"
+            :class="{ 'is-focused': focusedId === item.id }"
             :reminder="item"
             :now="store.now"
             @complete="onComplete"
             @snooze="onSnooze"
             @edit="onEdit"
+            @calendar="onCalendar"
             @remove="onRemove"
           />
         </div>
